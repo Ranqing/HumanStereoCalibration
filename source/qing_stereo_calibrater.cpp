@@ -1,4 +1,5 @@
 #include "qing_stereo_calibrater.h"
+#include "run_and_save_mono.h"
 
 #include "../../../Qing/qing_string.h"
 #include "../../../Qing/qing_dir.h"
@@ -7,30 +8,47 @@
 #include "../../../Qing/qing_ply.h"
 #include "../../../Qing/qing_basic.h"
 
-Qing_Stereo_Calibrater::Qing_Stereo_Calibrater(const string& data_folder, const string& mono_folder, const string& cam0, const string& cam1):
-    m_data_folder(data_folder), m_mono_folder(mono_folder), m_cam0(cam0), m_cam1(cam1)
-{
+//calibration paras
+#define BOARD_W 14
+#define BOARD_H 24
+#define SQUARE_SIZE 20.0f               //unit : mm
 
+void Qing_Stereo_Calibrater::set(const MODE mode, const string &data_folder, const string &cam0, const string &cam1)
+{
+    m_mode = mode;
+    m_data_folder = data_folder;
+    m_cam0 = cam0;
+    m_cam1 = cam1;
 }
 
-void Qing_Stereo_Calibrater::init()
+void Qing_Stereo_Calibrater::set(const MODE mode, const string &data_folder, const string &mono_folder, const string &cam0, const string &cam1)
 {
-    m_pattern = CHESSBOARD;
-    if(m_cam0[0] == 'A' || m_cam0[0] == 'B' || m_cam0[0] == 'C')
-        m_boardSize = Size(14, 24);
-    else
-        m_boardSize = Size(24, 14);
-    m_squareSize = 20.0f;   //mm
-    m_isBouguet = true;
+    m_mode = mode;
+    m_data_folder = data_folder;
+    m_mono_folder = mono_folder;
+    m_cam0 = cam0;
+    m_cam1 = cam1;
+}
 
+void Qing_Stereo_Calibrater::init_imagenames()
+{
     string dataFn0 = m_data_folder + "/imagelist_" + m_cam0 + ".txt";
     string dataFn1 = m_data_folder + "/imagelist_" + m_cam1 + ".txt";
-    m_imageNames0.resize(0);
-    m_imageNames1.resize(0);
-    qing_read_txt(dataFn0, m_imageNames0);
-    qing_read_txt(dataFn1, m_imageNames1);
+
+    m_image_names0.resize(0);
+    m_image_names1.resize(0);
+    qing_read_txt(dataFn0, m_image_names0);
+    qing_read_txt(dataFn1, m_image_names1);
     cout << "read image names done." << endl;
 
+    m_cam0_folder = m_data_folder + "/" + m_cam0;
+    m_cam1_folder = m_data_folder + "/" + m_cam1;
+    cout << "cam0's folder:  " << m_cam0_folder << endl;
+    cout << "cam1's folder:  " << m_cam1_folder << endl;
+}
+
+void Qing_Stereo_Calibrater::init_monoresults()
+{
     string monoFn0 = m_mono_folder + "/calib_" + m_cam0 + ".yml";
     string monoFn1 = m_mono_folder + "/calib_" + m_cam1 + ".yml";
     qing_read_intrinsic_yml(monoFn0, m_camera_matrix0, m_dist_coeffs0);
@@ -38,6 +56,17 @@ void Qing_Stereo_Calibrater::init()
     cout << monoFn0 << endl << m_camera_matrix0 << endl << m_dist_coeffs0 << endl;
     cout << monoFn1 << ": " << endl << m_camera_matrix1 << endl << m_dist_coeffs1 << endl;
     cout << "read intrinsics file done." << endl;
+}
+
+void Qing_Stereo_Calibrater::init_calibinfos()
+{
+    m_pattern = CHESSBOARD;
+    if('A' == m_cam0[0] || 'B' == m_cam0[0] || 'C' == m_cam0[0])
+        m_boardSize = Size(BOARD_W, BOARD_H);   //14 * 24
+    else
+        m_boardSize = Size(BOARD_H, BOARD_W);   //24 * 14
+    m_squareSize = SQUARE_SIZE;
+    m_isBouguet = true;
 
     m_out_folder = m_cam0 + m_cam1;
     qing_create_dir(m_out_folder);
@@ -49,28 +78,26 @@ void Qing_Stereo_Calibrater::init()
     cout << "initialization done..." << endl;
 }
 
-void Qing_Stereo_Calibrater::calib()
+void Qing_Stereo_Calibrater::extract_corners()
 {
-    vector<vector<Point3f> > objectPoints(0);
-
     int width, height;
     int successes = 0;
-    int nframes = m_imageNames0.size();
-    string folder0 = m_data_folder + "/" + m_cam0 + "/";
-    string folder1 = m_data_folder + "/" + m_cam1 + "/";
+    int nframes = m_image_names0.size();
+    string folder0 = m_cam0_folder + "/";
+    string folder1 = m_cam1_folder + "/";
 
     for(int i = 0; i < nframes; ++i )
     {
-        Mat view0 = imread(folder0 + m_imageNames0[i], 1);
+        Mat view0 = imread(folder0 + m_image_names0[i], 1);
         if(view0.data == NULL)
         {
-            cout << "failed to open " << m_imageNames0[1] << endl;
+            cout << "failed to open " << m_image_names0[i] << endl;
             return ;
         }
-        Mat view1 = imread(folder1 + m_imageNames1[i], 1);
+        Mat view1 = imread(folder1 + m_image_names1[i], 1);
         if(view1.data == NULL)
         {
-            cout << "failed to open " << m_imageNames1[i] << endl;
+            cout << "failed to open " << m_image_names1[i] << endl;
             return ;
         }
         Mat grayView0, grayView1;
@@ -103,19 +130,19 @@ void Qing_Stereo_Calibrater::calib()
             cornerSubPix(grayView0, corners0, Size(11, 11), Size(-1,-1), TermCriteria(CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 30, 0.1));
             cornerSubPix(grayView1, corners1, Size(11, 11), Size(-1,-1), TermCriteria(CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 30, 0.1));
 
-//            drawChessboardCorners(view0, m_boardSize, corners0, found);
-//            drawChessboardCorners(view1, m_boardSize, corners1, found);
+            drawChessboardCorners(view0, m_boardSize, corners0, found);
+            drawChessboardCorners(view1, m_boardSize, corners1, found);
 
-//            width =  m_imageSize.width;
-//            height = m_imageSize.height;
-//            Mat canvas(height, 2 * width, CV_8UC3);
-//            Mat part = canvas(Rect(0,0,width,height));
-//            view0.copyTo(part);
-//            part = canvas(Rect(width,0,width,height));
-//            view1.copyTo(part);
+            width =  m_imageSize.width;
+            height = m_imageSize.height;
+            Mat canvas(height, 2 * width, CV_8UC3);
+            Mat part = canvas(Rect(0,0,width,height));
+            view0.copyTo(part);
+            part = canvas(Rect(width,0,width,height));
+            view1.copyTo(part);
 
-//            string savefn = m_out_folder + "/corners_" + int2FormatString(i,4, '0') + ".jpg";
-//            imwrite(savefn, canvas);
+            string savefn = m_out_folder + "/corners_" + int2FormatString(i,4, '0') + ".jpg";
+            imwrite(savefn, canvas);
         }
         else
         {
@@ -128,10 +155,50 @@ void Qing_Stereo_Calibrater::calib()
         m_image_points1.push_back(corners1);
         successes ++;
     }
-    cout << "corners detection: " << successes << " pairs. " << endl;
+    cout << "corners extraction: " << successes << " pairs. " << endl;
+}
 
-    objectPoints.clear();
-    objectPoints.resize(successes);
+//copy from mono-calibration
+void Qing_Stereo_Calibrater::mono_calib()
+{
+    if(m_image_points0.empty() || m_image_points1.empty())
+    {
+        m_image_points0.clear(); m_image_points0.resize(0);
+        m_image_points1.clear(); m_image_points1.resize(0);
+        cout << "extract corners first...." << endl;
+        extract_corners();
+    }
+
+    /********************************calibration params***************************************/
+    bool writeExtrinsics = false;
+    bool writePoints = false;
+    int flags = 0;
+    bool calibFixPrincipalPoint = 1;
+    bool calibZeroTangentDist = 1;
+    float aspectRatio = 1.0f;
+
+    if(calibFixPrincipalPoint) flags |= CV_CALIB_FIX_PRINCIPAL_POINT;
+    if(calibZeroTangentDist)   flags |= CV_CALIB_ZERO_TANGENT_DIST;
+    if(aspectRatio)            flags |= CV_CALIB_FIX_ASPECT_RATIO;
+    /****************************************************************************************/
+
+    string out_file_0 = m_out_folder + "/calib_" + m_cam0 + ".yml";
+
+    runAndSave(out_file_0, m_image_points0, m_imageSize, m_boardSize, m_pattern,
+               m_squareSize, aspectRatio, flags, m_camera_matrix0, m_dist_coeffs0, writeExtrinsics, writePoints);
+    cout << "save " << out_file_0 << endl;
+
+    string out_file_1 = m_out_folder + "/calib_" + m_cam1 + ".yml";
+    runAndSave(out_file_1, m_image_points1, m_imageSize, m_boardSize, m_pattern,
+               m_squareSize, aspectRatio, flags, m_camera_matrix1, m_dist_coeffs1, writeExtrinsics, writePoints);
+    cout << "save " << out_file_1 << endl;
+}
+
+void Qing_Stereo_Calibrater::bino_calib()
+{
+    int successes = m_image_points0.size();
+    vector<vector<Point3f> > objectPoints(successes);
+
     for (int k = 0; k < successes; k ++)
     {
         for (int h = 0; h < m_boardSize.height; h ++)
@@ -158,8 +225,8 @@ void Qing_Stereo_Calibrater::rectify()
     m_P1.create(3, 4, CV_64F);
     m_stereo_Q.create(4, 4, CV_64F);
 
-    string folder0 = m_data_folder + "/" + m_cam0 + "/";
-    string folder1 = m_data_folder + "/" + m_cam1 + "/";
+    string folder0 = m_cam0_folder + "/";
+    string folder1 = m_cam1_folder + "/";
 
     if(m_isBouguet)
     {
@@ -170,6 +237,8 @@ void Qing_Stereo_Calibrater::rectify()
                       m_imageSize, m_stereo_R, m_stereo_T, m_R0, m_R1, m_P0, m_P1, m_stereo_Q, CALIB_ZERO_DISPARITY, 1, m_imageSize);
 
         cout << "Rectification Matrix Calculation Done." << endl;
+
+#if CHECK_RECT_ERR
 
         m_mapx0 = Mat::zeros(m_imageSize, CV_32F);
         m_mapy0 = Mat::zeros(m_imageSize, CV_32F);
@@ -188,14 +257,14 @@ void Qing_Stereo_Calibrater::rectify()
         m_image_points1.clear(); m_image_points1.resize(0);
 
         int numOfCorners = 0;
-        for(int i = 0; i < m_imageNames0.size(); ++i)
+        for(int i = 0; i < m_image_names0.size(); ++i)
         {
             Mat view0, gray_view0, view1, gray_view1;
             Mat new_view0, new_gray_view0, new_view1, new_gray_view1;
 
-            view0 = imread( folder0 + m_imageNames0[i], 1);
+            view0 = imread( folder0 + m_image_names0[i], 1);
             cvtColor(view0, gray_view0, CV_BGR2GRAY);
-            view1 = imread( folder1 + m_imageNames1[i], 1);
+            view1 = imread( folder1 + m_image_names1[i], 1);
             cvtColor(view1,gray_view1, CV_BGR2GRAY);
 
             if(view0.data == NULL || view1.data == NULL)
@@ -258,6 +327,8 @@ void Qing_Stereo_Calibrater::rectify()
 
         if(numOfCorners != 0)
             m_avg_rect_err /= numOfCorners;
+
+#endif
     }
     else
     {
@@ -297,13 +368,13 @@ void Qing_Stereo_Calibrater::reconstruct()
         string savefile = m_out_folder + "/reconstruct_chessboard_" + int2FormatString(i, 4, '0') + ".xyz";
         qing_write_xyz(savefile, object_points);
 
-        cout << "reconstruct frame " << i << ", " << object_points.size() << " points. saving in " << savefile << endl;
+        cout << "reconstruct frame " << i << ", " << object_points.size() << " points. saving in " << savefile << '\t';
 
         cal_reconstruct_error(object_points, m_avg_recons_err, m_max_recons_err);
     }
-    m_avg_recons_err /= ( numOfFrames *  ( m_boardSize.width - 1 ) * m_boardSize.height );
-    //    m_avg_recons_err /= (numOfFrames * ( ( m_boardSize.width - 1 ) * m_boardSize.height +
-    //                                         m_boardSize.width * (m_boardSize.height - 1) ) );
+    //  m_avg_recons_err /= ( numOfFrames *  ( m_boardSize.width - 1 ) * m_boardSize.height );
+    m_avg_recons_err /= (numOfFrames * ( ( m_boardSize.width - 1 ) * m_boardSize.height +
+                                         m_boardSize.width * (m_boardSize.height - 1) ) );
 
     cout << "average_reconstruct_err = " << m_avg_recons_err << ", max_reconstruct_err = " << m_max_recons_err << endl;
 }
@@ -329,21 +400,21 @@ void Qing_Stereo_Calibrater::cal_reconstruct_error(vector<Point3f> &object_point
         }
     }
 
-    //vertical
-    //    for(int i = 0; i < h-1; ++i)
-    //    {
-    //        for(int j = 0; j < w; ++j)
-    //        {
-    //            int idx0 = i * w + j;
-    //            int idx1 = idx0 + w;
+    // vertical
+    for(int i = 0; i < h-1; ++i)
+    {
+        for(int j = 0; j < w; ++j)
+        {
+            int idx0 = i * w + j;
+            int idx1 = idx0 + w;
 
-    //            float dis = qing_euclidean_dis(object_points[idx1] , object_points[idx0]);
-    //            total_recons_err += dis;
+            float dis = qing_euclidean_dis(object_points[idx1] , object_points[idx0]);
+            total_recons_err += dis;
 
-    //            if(dis > max_recons_err )
-    //                max_recons_err = dis;
-    //        }
-    //    }
+            if(dis > max_recons_err )
+                max_recons_err = dis;
+        }
+    }
 
     cout << "max_recons_err = " << max_recons_err << endl;
 }
@@ -366,19 +437,24 @@ void Qing_Stereo_Calibrater::save()
     fs << "Image_Width"       << m_imageSize.width;
     fs << "Image_Height"      << m_imageSize.height;
     fs << "RMS"               << m_rms ;
+ #if CHECK_RECT_ERR
     fs << "Average_Rectified_Error"   << m_avg_rect_err ;
     fs << "Max_Rectified_Error"       << m_max_rect_err - m_squareSize;
+ #endif
+ #if CHECK_RECONS_ERR
     fs << "Average_Reconstruct_Error" << m_avg_recons_err - m_squareSize ;
     fs << "Max_Reconstruct_Error"     << m_max_recons_err ;
+#endif
     fs << "Rotation_Matrix"    << m_stereo_R;
     fs << "Translation_Vector" << m_stereo_T;
     fs << "Eigen_Matrix"       << m_stereo_E;
     fs << "Fundamental_Matrix" << m_stereo_F;
     fs << "Q" << m_stereo_Q;
-
+#if CHECK_RECT_ERR
     fs << "R1" << m_R0;
     fs << "R2" << m_R1;
     fs << "P1" << m_P0;
     fs << "P2" << m_P1;
+#endif
     fs.release();
 }

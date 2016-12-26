@@ -3,8 +3,8 @@
 
 #include "common.h"
 
-#define CHECK_RECT_ERR 0
-#define CHECK_RECONS_ERR 0
+#define CHECK_RECT_ERR 1
+#define CHECK_RECONS_ERR 1
 
 class Qing_Stereo_Calibrater
 {

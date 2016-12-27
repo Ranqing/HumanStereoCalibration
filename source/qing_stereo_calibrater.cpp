@@ -1,12 +1,12 @@
 #include "qing_stereo_calibrater.h"
 #include "run_and_save_mono.h"
 
-#include "../../../Qing/qing_string.h"
-#include "../../../Qing/qing_dir.h"
-#include "../../../Qing/qing_io.h"
-#include "../../../Qing/qing_converter.h"
-#include "../../../Qing/qing_ply.h"
-#include "../../../Qing/qing_basic.h"
+#include "../../Qing/qing_string.h"
+#include "../../Qing/qing_dir.h"
+#include "../../Qing/qing_io.h"
+#include "../../Qing/qing_converter.h"
+#include "../../Qing/qing_ply.h"
+#include "../../Qing/qing_basic.h"
 
 //calibration paras
 #define BOARD_W 14
@@ -374,7 +374,7 @@ void Qing_Stereo_Calibrater::reconstruct()
     }
     //  m_avg_recons_err /= ( numOfFrames *  ( m_boardSize.width - 1 ) * m_boardSize.height );
     m_avg_recons_err /= (numOfFrames * ( ( m_boardSize.width - 1 ) * m_boardSize.height +
-                                         m_boardSize.width * (m_boardSize.height - 1) ) );
+                                           m_boardSize.width * (m_boardSize.height - 1) ) );
 
     cout << "average_reconstruct_err = " << m_avg_recons_err << ", max_reconstruct_err = " << m_max_recons_err << endl;
 }
@@ -439,11 +439,11 @@ void Qing_Stereo_Calibrater::save()
     fs << "RMS"               << m_rms ;
  #if CHECK_RECT_ERR
     fs << "Average_Rectified_Error"   << m_avg_rect_err ;
-    fs << "Max_Rectified_Error"       << m_max_rect_err - m_squareSize;
+    fs << "Max_Rectified_Error"       << m_max_rect_err ;
  #endif
  #if CHECK_RECONS_ERR
     fs << "Average_Reconstruct_Error" << m_avg_recons_err - m_squareSize ;
-    fs << "Max_Reconstruct_Error"     << m_max_recons_err ;
+    fs << "Max_Reconstruct_Error"     << m_max_recons_err - m_squareSize;
 #endif
     fs << "Rotation_Matrix"    << m_stereo_R;
     fs << "Translation_Vector" << m_stereo_T;

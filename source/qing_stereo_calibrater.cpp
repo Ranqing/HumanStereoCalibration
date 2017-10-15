@@ -1,12 +1,12 @@
 #include "qing_stereo_calibrater.h"
 #include "run_and_save_mono.h"
 
-#include "../../Qing/qing_string.h"
-#include "../../Qing/qing_dir.h"
-#include "../../Qing/qing_io.h"
-#include "../../Qing/qing_converter.h"
-#include "../../Qing/qing_ply.h"
-#include "../../Qing/qing_basic.h"
+#include "../qing_string.h"
+#include "../qing_dir.h"
+#include "../qing_converter.h"
+#include "../qing_ply.h"
+#include "../qing_io.h"
+#include "../qing_basic.h"
 
 //calibration paras
 #define BOARD_W 14
@@ -228,6 +228,8 @@ void Qing_Stereo_Calibrater::rectify()
     string folder0 = m_cam0_folder + "/";
     string folder1 = m_cam1_folder + "/";
 
+    float frm_max_rect_err;
+
     if(m_isBouguet)
     {
         m_avg_rect_err = 0.f;
@@ -237,9 +239,10 @@ void Qing_Stereo_Calibrater::rectify()
                       m_imageSize, m_stereo_R, m_stereo_T, m_R0, m_R1, m_P0, m_P1, m_stereo_Q, CALIB_ZERO_DISPARITY, 1, m_imageSize);
 
         cout << "Rectification Matrix Calculation Done." << endl;
+        cout << "Q: " << m_stereo_Q << endl;
 
 #if CHECK_RECT_ERR
-
+        cout << "Check Rectification Error... " << endl;
         m_mapx0 = Mat::zeros(m_imageSize, CV_32F);
         m_mapy0 = Mat::zeros(m_imageSize, CV_32F);
         m_mapx1 = Mat::zeros(m_imageSize, CV_32F);
@@ -304,6 +307,8 @@ void Qing_Stereo_Calibrater::rectify()
             part = isVertical ? canvas(Rect(0, height, width, height)) : canvas(Rect(width,0,width,height));
             new_view1.copyTo(part);
 
+            frm_max_rect_err = 0.f;
+
             for(int j = 0; j < corners0.size(); ++j)
             {
                 Point2f pt0 = corners0[j];
@@ -319,10 +324,15 @@ void Qing_Stereo_Calibrater::rectify()
                 {
                     m_max_rect_err = fabs(pt0.y - pt1.y);
                 }
+                if(fabs(pt1.y - pt0.y) > frm_max_rect_err)
+                {
+                    frm_max_rect_err = fabs(pt0.y - pt1.y);
+                }
             }
 
             string savefn = m_out_folder + "/rectified_" +  int2FormatString(i, 4, '0') + ".jpg";
             imwrite(savefn, canvas);
+            cout << "frm " << i << " max rect-err = " << frm_max_rect_err << endl;
         }
 
         if(numOfCorners != 0)
@@ -374,8 +384,10 @@ void Qing_Stereo_Calibrater::reconstruct()
     }
     //  m_avg_recons_err /= ( numOfFrames *  ( m_boardSize.width - 1 ) * m_boardSize.height );
     m_avg_recons_err /= (numOfFrames * ( ( m_boardSize.width - 1 ) * m_boardSize.height +
-                                           m_boardSize.width * (m_boardSize.height - 1) ) );
+                                         m_boardSize.width * (m_boardSize.height - 1) ) );
 
+    m_avg_recons_err -= m_squareSize;
+    m_max_recons_err -= m_squareSize;
     cout << "average_reconstruct_err = " << m_avg_recons_err << ", max_reconstruct_err = " << m_max_recons_err << endl;
 }
 
@@ -432,18 +444,19 @@ void Qing_Stereo_Calibrater::save()
 
     fs << "Calibration_Time"  << buf;
     fs << "Rectify_Method"    << "Bouguet";
+    // fs << "Square_Size"       << m_squareSize;
     fs << "Left_Camera_Name"  << m_cam0;
     fs << "Right_Camera_Name" << m_cam1;
     fs << "Image_Width"       << m_imageSize.width;
     fs << "Image_Height"      << m_imageSize.height;
     fs << "RMS"               << m_rms ;
- #if CHECK_RECT_ERR
+#if CHECK_RECT_ERR
     fs << "Average_Rectified_Error"   << m_avg_rect_err ;
     fs << "Max_Rectified_Error"       << m_max_rect_err ;
- #endif
- #if CHECK_RECONS_ERR
-    fs << "Average_Reconstruct_Error" << m_avg_recons_err - m_squareSize ;
-    fs << "Max_Reconstruct_Error"     << m_max_recons_err - m_squareSize;
+#endif
+#if CHECK_RECONS_ERR
+    fs << "Average_Reconstruct_Error" << m_avg_recons_err ;
+    fs << "Max_Reconstruct_Error"     << m_max_recons_err ;
 #endif
     fs << "Rotation_Matrix"    << m_stereo_R;
     fs << "Translation_Vector" << m_stereo_T;
